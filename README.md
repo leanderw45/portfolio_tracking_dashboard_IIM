@@ -50,8 +50,9 @@ and sent with each request.
   `Initial Cash + Realized + Unrealized − Fees == NAV == Cash + Σ Market Value` on hand-built cases,
   randomised long/short sequences and the real blotter. The API also reports the live `invariant_gap`, which
   should always be 0.
-- **Equity curve.** NAV is marked on 30-minute bars and on daily closes. Both curves start at the first fill,
-  with the benchmark rebased to that same moment.
+- **Performance window.** Everything is measured from `START_DATE` in `backend/app/main.py` (Nov 1, 2026), so
+  the weeks spent in cash before the first trade count toward return, Sharpe, drawdown and the benchmark
+  comparison. The benchmark is rebased to its last close on or before that date.
 - **Realised risk** covers Sharpe, Sortino, volatility, beta, alpha, tracking error, capture ratios, VaR,
   drawdown and win rate, using the 13-week T-bill as the risk-free rate. For the first 20 sessions these come
   from 30-minute returns and are flagged as an *early estimate*; after that they use daily returns.

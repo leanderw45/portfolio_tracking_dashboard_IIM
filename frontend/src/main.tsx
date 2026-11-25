@@ -543,7 +543,7 @@ function App() {
               ))}
               {data && (
                 <span className="ml-auto hidden pb-2 text-[11px] text-ink-3 lg:block">
-                  Inception {fmtDate(data.meta.inception, true)} · {data.meta.days_live} sessions · benchmark {data.meta.benchmark_label}
+                  Since {fmtDate(data.meta.inception, true)} · first trade {fmtDate(data.meta.first_trade)} · {data.meta.days_live} sessions · benchmark {data.meta.benchmark_label}
                 </span>
               )}
             </nav>

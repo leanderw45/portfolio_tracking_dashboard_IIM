@@ -27,6 +27,7 @@ BENCHMARKS = {"^GSPC": "S&P 500 Index", "SPY": "SPY · S&P 500 ETF"}
 BENCHMARK_FUND = "SPY"
 DEFAULT_CASH = 10_000_000.0
 INTRADAY, BAR = "30m", pd.Timedelta(minutes=30)
+START_DATE = "2026-11-01"
 MIN_DAILY_OBS = 20
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
@@ -68,7 +69,8 @@ def core(bench: str, initial_cash: float) -> dict:
     trades = load.trades
     tickers = sorted(trades["ticker"].unique())
     first_ts: pd.Timestamp = trades["timestamp"].min()
-    first_day = first_ts.tz_localize(None).normalize()
+    start_ts = min(first_ts, pd.Timestamp(START_DATE, tz=MARKET_TZ))
+    first_day = start_ts.tz_localize(None).normalize()
     now = pd.Timestamp.now(tz=MARKET_TZ)
 
     daily_close = md.close_frame(tickers + [bench], first_day - pd.Timedelta(days=10), "1d")
@@ -100,16 +102,16 @@ def core(bench: str, initial_cash: float) -> dict:
     bench_at_inception = None
     if bench in intra_open:
         bars = intra_open[bench].dropna()
-        hit = bars[(bars.index <= first_ts) & (bars.index + BAR > first_ts)]
+        hit = bars[(bars.index <= start_ts) & (bars.index + BAR > start_ts)]
         bench_at_inception = float(hit.iloc[-1]) if len(hit) else None
     if bench_at_inception is None:
         before = daily_close[bench].loc[: first_day - pd.Timedelta(days=1)].dropna()
         bench_at_inception = float(before.iloc[-1]) if len(before) else float(daily_close[bench].dropna().iloc[0])
 
-    inception = pd.DataFrame({"nav": [initial_cash], "cash": [initial_cash], "market_value": [0.0]}, index=pd.DatetimeIndex([first_ts]))
+    inception = pd.DataFrame({"nav": [initial_cash], "cash": [initial_cash], "market_value": [0.0]}, index=pd.DatetimeIndex([start_ts]))
 
     def build(px: pd.DataFrame, valuation: pd.DatetimeIndex) -> pd.DataFrame:
-        keep = valuation > first_ts
+        keep = valuation > start_ts
         px, valuation = px.loc[keep], valuation[keep]
         ser = inception.copy()
         if not px.empty:
@@ -117,7 +119,7 @@ def core(bench: str, initial_cash: float) -> dict:
             body.index = valuation
             ser = pd.concat([inception, body])
         bench_vals = px[bench].values if bench in px else []
-        ser["bench"] = pd.concat([pd.Series([bench_at_inception], index=[first_ts]), pd.Series(bench_vals, index=valuation)]).ffill().values
+        ser["bench"] = pd.concat([pd.Series([bench_at_inception], index=[start_ts]), pd.Series(bench_vals, index=valuation)]).ffill().values
         ser["ret"] = ser["nav"] / initial_cash - 1
         ser["bench_ret"] = ser["bench"] / bench_at_inception - 1
         ser["drawdown"] = m.drawdown_series(ser["nav"])
@@ -150,6 +152,7 @@ def core(bench: str, initial_cash: float) -> dict:
         "rf": rf,
         "basis": {"frequency": "daily" if use_daily else INTRADAY, "periods_per_year": ppy, "observations": len(basis) - 1, "rolling_window": window},
         "first_ts": first_ts,
+        "start_ts": start_ts,
         "now": now,
         "as_of": min(intra_close.index[-1] + BAR, now) if not intra_close.empty else daily_valuation_times(daily_close.index[-1:])[0],
     }
@@ -176,8 +179,9 @@ def build_dashboard(bench: str, initial_cash: float) -> dict:
             "as_of": c["as_of"],
             "last_price_fetch": datetime.fromtimestamp(md.last_fetch, tz=timezone.utc) if md.last_fetch else None,
             "market_live": bool(c["now"] - c["as_of"] < pd.Timedelta(minutes=45) and c["now"].weekday() < 5),
-            "inception": c["first_ts"],
-            "days_live": int(np.busday_count(c["first_ts"].date(), (c["now"] + pd.Timedelta(days=1)).date())),
+            "inception": c["start_ts"],
+            "first_trade": c["first_ts"],
+            "days_live": int(np.busday_count(c["start_ts"].date(), (c["now"] + pd.Timedelta(days=1)).date())),
             "benchmark": bench,
             "benchmark_label": BENCHMARKS[bench],
             "benchmarks": [{"value": k, "label": v} for k, v in BENCHMARKS.items()],

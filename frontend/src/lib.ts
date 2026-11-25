@@ -54,6 +54,7 @@ export interface Dashboard {
     last_price_fetch: string | null
     market_live: boolean
     inception: string
+    first_trade: string
     days_live: number
     benchmark: string
     benchmark_label: string
