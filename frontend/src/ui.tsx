@@ -5,6 +5,7 @@ import type { N } from './lib'
 
 export const PORT = '#3B82F6'
 export const BENCH = '#64748B'
+export const HOLD = '#9085E9'
 
 export function Card({
   title,

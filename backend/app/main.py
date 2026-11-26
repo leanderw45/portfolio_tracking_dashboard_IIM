@@ -71,6 +71,7 @@ def core(bench: str, initial_cash: float) -> dict:
     first_ts: pd.Timestamp = trades["timestamp"].min()
     start_ts = min(first_ts, pd.Timestamp(START_DATE, tz=MARKET_TZ))
     first_day = start_ts.tz_localize(None).normalize()
+    initial_trades = trades[trades["timestamp"].dt.date == first_ts.date()]
     now = pd.Timestamp.now(tz=MARKET_TZ)
 
     daily_close = md.close_frame(tickers + [bench], first_day - pd.Timedelta(days=10), "1d")
@@ -108,20 +109,23 @@ def core(bench: str, initial_cash: float) -> dict:
         before = daily_close[bench].loc[: first_day - pd.Timedelta(days=1)].dropna()
         bench_at_inception = float(before.iloc[-1]) if len(before) else float(daily_close[bench].dropna().iloc[0])
 
-    inception = pd.DataFrame({"nav": [initial_cash], "cash": [initial_cash], "market_value": [0.0]}, index=pd.DatetimeIndex([start_ts]))
+    inception = pd.DataFrame({"nav": [initial_cash], "cash": [initial_cash], "market_value": [0.0], "bh_nav": [initial_cash]}, index=pd.DatetimeIndex([start_ts]))
 
     def build(px: pd.DataFrame, valuation: pd.DatetimeIndex) -> pd.DataFrame:
         keep = valuation > start_ts
         px, valuation = px.loc[keep], valuation[keep]
         ser = inception.copy()
         if not px.empty:
-            body = nav_series(trades, px.drop(columns=[bench], errors="ignore"), initial_cash, valuation)
+            held = px.drop(columns=[bench], errors="ignore")
+            body = nav_series(trades, held, initial_cash, valuation)
+            body["bh_nav"] = nav_series(initial_trades, held, initial_cash, valuation)["nav"]
             body.index = valuation
             ser = pd.concat([inception, body])
         bench_vals = px[bench].values if bench in px else []
         ser["bench"] = pd.concat([pd.Series([bench_at_inception], index=[start_ts]), pd.Series(bench_vals, index=valuation)]).ffill().values
         ser["ret"] = ser["nav"] / initial_cash - 1
         ser["bench_ret"] = ser["bench"] / bench_at_inception - 1
+        ser["bh_ret"] = ser["bh_nav"] / initial_cash - 1
         ser["drawdown"] = m.drawdown_series(ser["nav"])
         ser["bench_drawdown"] = m.drawdown_series(ser["bench"])
         return ser
@@ -152,6 +156,7 @@ def core(bench: str, initial_cash: float) -> dict:
         "rf": rf,
         "basis": {"frequency": "daily" if use_daily else INTRADAY, "periods_per_year": ppy, "observations": len(basis) - 1, "rolling_window": window},
         "first_ts": first_ts,
+        "initial_trade_count": len(initial_trades),
         "start_ts": start_ts,
         "now": now,
         "as_of": min(intra_close.index[-1] + BAR, now) if not intra_close.empty else daily_valuation_times(daily_close.index[-1:])[0],
@@ -167,11 +172,12 @@ def build_dashboard(bench: str, initial_cash: float) -> dict:
     nav_prev = float(daily["nav"].iloc[-2]) if len(daily) >= 2 else initial_cash
     bench_now, bench_prev = float(daily["bench"].iloc[-1]), float(daily["bench"].iloc[-2]) if len(daily) >= 2 else None
     bench_total = float(daily["bench_ret"].iloc[-1])
+    bh_total = float(daily["bh_ret"].iloc[-1])
     daily_pnl = float(open_pos["daily_pnl"].sum()) if len(open_pos) else 0.0
     n_win = int((open_pos["unrealized_pnl"] > 0).sum())
 
     def series(df: pd.DataFrame) -> list[dict]:
-        return [{"t": ts, "nav": r.nav, "cash": r.cash, "ret": r.ret, "bench": r.bench, "bench_ret": r.bench_ret, "dd": r.drawdown, "bench_dd": r.bench_drawdown} for ts, r in df.iterrows()]
+        return [{"t": ts, "nav": r.nav, "cash": r.cash, "ret": r.ret, "bench": r.bench, "bench_ret": r.bench_ret, "bh_nav": r.bh_nav, "bh_ret": r.bh_ret, "dd": r.drawdown, "bench_dd": r.bench_drawdown} for ts, r in df.iterrows()]
 
     return jsonable({
         "meta": {
@@ -189,6 +195,7 @@ def build_dashboard(bench: str, initial_cash: float) -> dict:
             "risk_free_rate": c["rf"],
             "metrics_basis": c["basis"],
             "warnings": list(dict.fromkeys(c["load"].warnings + md.warnings)),
+            "buy_hold": {"date": c["first_ts"], "initial_trades": c["initial_trade_count"], "later_trades": len(c["ledger"].trade_log) - c["initial_trade_count"]},
             "invariant_gap": (t["initial_cash"] + t["realized_pnl"] + t["unrealized_pnl"] - t["fees"]) - nav,
         },
         "kpis": {
@@ -197,6 +204,8 @@ def build_dashboard(bench: str, initial_cash: float) -> dict:
             "total_return": t["total_pnl"] / initial_cash,
             "benchmark_return": bench_total,
             "excess_return": t["total_pnl"] / initial_cash - bench_total,
+            "buy_hold_return": bh_total,
+            "vs_buy_hold": float(daily["ret"].iloc[-1]) - bh_total,
             "daily_pnl": daily_pnl,
             "daily_return": daily_pnl / nav_prev if nav_prev else None,
             "benchmark_daily_return": bench_now / bench_prev - 1 if bench_prev else None,

@@ -7,6 +7,8 @@ export interface SeriesPoint {
   ret: number
   bench: number
   bench_ret: number
+  bh_nav: number
+  bh_ret: number
   dd: number
   bench_dd: number
 }
@@ -63,6 +65,7 @@ export interface Dashboard {
     risk_free_rate: number
     metrics_basis: { frequency: string; periods_per_year: number; observations: number; rolling_window: number }
     warnings: string[]
+    buy_hold: { date: string; initial_trades: number; later_trades: number }
     invariant_gap: number
   }
   kpis: {
@@ -71,6 +74,8 @@ export interface Dashboard {
     total_return: number
     benchmark_return: N
     excess_return: N
+    buy_hold_return: number
+    vs_buy_hold: number
     daily_pnl: number
     daily_return: N
     benchmark_daily_return: N

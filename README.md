@@ -53,6 +53,9 @@ and sent with each request.
 - **Performance window.** Everything is measured from `START_DATE` in `backend/app/main.py` (Nov 1, 2026), so
   the weeks spent in cash before the first trade count toward return, Sharpe, drawdown and the benchmark
   comparison. The benchmark is rebased to its last close on or before that date.
+- **Buy & hold.** The initial portfolio is all trades of the first trading day. The buy-and-hold line values
+  exactly those positions with no later trades, using the same pricing as the portfolio, so the two lines coincide
+  until trades after that day are logged. The Overview shows the gap in bps (`vs buy & hold`).
 - **Realised risk** covers Sharpe, Sortino, volatility, beta, alpha, tracking error, capture ratios, VaR,
   drawdown and win rate, using the 13-week T-bill as the risk-free rate. For the first 20 sessions these come
   from 30-minute returns and are flagged as an *early estimate*; after that they use daily returns.

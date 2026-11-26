@@ -235,3 +235,20 @@ def test_look_through_aggregates_direct_and_etf_exposure():
     assert mu["weight"] == pytest.approx(0.04 + 0.10 * 0.08)
     assert [o["symbol"] for o in lt["overlaps"]] == ["MU"]
     assert lt["residuals"][0]["weight"] == pytest.approx(0.10 * (1 - 0.17))
+
+
+def test_buy_and_hold_equals_portfolio_until_later_trades():
+    tr = make_trades([
+        ("2026-11-18 09:35", "AAA", "BUY", 100, 10.0, 1),
+        ("2026-11-18 09:36", "BBB", "BUY", 50, 20.0, 1),
+        ("2026-11-20 10:00", "AAA", "SELL", 60, 12.0, 1),
+    ])
+    initial = tr[tr["timestamp"].dt.date == tr["timestamp"].min().date()]
+    idx = pd.DatetimeIndex(pd.to_datetime(["2026-11-18 16:00", "2026-11-19 16:00", "2026-11-20 16:00"]).tz_localize(TZ))
+    px = pd.DataFrame({"AAA": [11.0, 10.5, 13.0], "BBB": [21.0, 19.0, 22.0]}, index=idx)
+    full = nav_series(tr, px, 10_000)["nav"]
+    hold = nav_series(initial, px, 10_000)["nav"]
+    assert full.iloc[:2].tolist() == hold.iloc[:2].tolist()
+    assert hold.iloc[2] == pytest.approx(10_000 - 1000 - 1 - 1000 - 1 + 100 * 13.0 + 50 * 22.0)
+    assert full.iloc[2] != hold.iloc[2]
+    assert nav_series(tr.iloc[:2], px, 10_000)["nav"].tolist() == hold.tolist()

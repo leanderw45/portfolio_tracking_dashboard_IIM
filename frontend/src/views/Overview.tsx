@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { bps, fmtDate, fmtDateTime, num, nyDayKey, pct, tone, usd, type Dashboard, type Exposures, type SeriesPoint } from '../lib'
-import { BENCH, Card, DivergingBars, Legend, PORT, RankedBars, Segmented, SegmentedBar, Stat, TooltipShell } from '../ui'
+import { BENCH, Card, DivergingBars, HOLD, Legend, PORT, RankedBars, Segmented, SegmentedBar, Stat, TooltipShell } from '../ui'
 
 export function Overview({ data, exposures }: { data: Dashboard; exposures: Exposures | null }) {
   const [moverMode, setMoverMode] = useState<'total' | 'today'>('total')
@@ -93,7 +93,7 @@ export function Overview({ data, exposures }: { data: Dashboard; exposures: Expo
               <Stat label="Active return" value={bps(k.excess_return)} valueClass={tone(k.excess_return)} sub={`vs ${data.meta.benchmark_label}`} />
               <Stat label="Beta (realised)" value={num(data.risk.beta as number | null, 2)} sub={`${data.meta.metrics_basis.observations} obs`} />
               <Stat label="Effective # of bets" value={num(data.risk.concentration_effective_n as number | null, 1)} tip="1 / Σw² over invested weights. A portfolio of N equal-weight names scores N." />
-              <Stat label="Days live" value={data.meta.days_live} sub="trading sessions" />
+              <Stat label="vs Buy & hold" value={bps(k.vs_buy_hold)} valueClass={tone(k.vs_buy_hold)} sub={`${data.meta.buy_hold.later_trades} trades since ${fmtDate(data.meta.buy_hold.date)}`} />
             </div>
           </Card>
         </div>
@@ -113,6 +113,8 @@ interface Pt {
   bench: number
   portRet: number
   benchRet: number
+  hold: number
+  holdRet: number
 }
 
 function windowed(series: SeriesPoint[], days: number): SeriesPoint[] {
@@ -142,6 +144,8 @@ function EquityCurve({ data }: { data: Dashboard }) {
       bench: (p0.nav * p.bench) / p0.bench,
       portRet: p.nav / p0.nav - 1,
       benchRet: p.bench / p0.bench - 1,
+      hold: p.bh_nav,
+      holdRet: p.bh_nav / p0.bh_nav - 1,
     }))
     return { pts, intraday: useIntra && intra.length > 1 }
   }, [data, range])
@@ -164,15 +168,18 @@ function EquityCurve({ data }: { data: Dashboard }) {
   const last = pts[pts.length - 1]
   const yKeyP = mode === 'pct' ? 'portRet' : 'port'
   const yKeyB = mode === 'pct' ? 'benchRet' : 'bench'
+  const yKeyH = mode === 'pct' ? 'holdRet' : 'hold'
   const fmtY = (v: number) => (mode === 'pct' ? pct(v, { decimals: 1 }) : usd(v, { compact: true }))
   const active = last ? last.portRet - last.benchRet : null
+  const vsHold = last ? last.portRet - last.holdRet : null
+  const hold = data.meta.buy_hold
 
   return (
     <Card
       title="Equity curve"
       subtitle={
         <>
-          Portfolio vs {data.meta.benchmark_label} · {intraday ? '30-minute bars' : 'daily closes'} · rebased to window start
+          vs {data.meta.benchmark_label} and buy &amp; hold (initial {hold.initial_trades} trades of {fmtDate(hold.date)}, never traded again) · {intraday ? '30-minute bars' : 'daily closes'}
         </>
       }
       actions={
@@ -199,10 +206,13 @@ function EquityCurve({ data }: { data: Dashboard }) {
             items={[
               { label: 'Portfolio', color: PORT, value: <span className={tone(last.portRet)}>{mode === 'pct' ? pct(last.portRet, { sign: true }) : usd(last.port)}</span> },
               { label: benchLabel, color: BENCH, value: <span className="text-ink-2">{mode === 'pct' ? pct(last.benchRet, { sign: true }) : usd(last.bench)}</span> },
+              { label: 'Buy & hold', color: HOLD, value: <span className="text-ink-2">{mode === 'pct' ? pct(last.holdRet, { sign: true }) : usd(last.hold)}</span> },
             ]}
           />
           <div className="text-xs text-ink-3">
-            Active return <span className={`num ml-1 font-medium ${tone(active)}`}>{bps(active)}</span>
+            vs {benchLabel} <span className={`num ml-1 font-medium ${tone(active)}`}>{bps(active)}</span>
+            <span className="mx-2 text-line-strong">·</span>
+            vs buy &amp; hold <span className={`num ml-1 font-medium ${tone(vsHold)}`}>{bps(vsHold)}</span>
           </div>
         </div>
       )}
@@ -245,13 +255,16 @@ function EquityCurve({ data }: { data: Dashboard }) {
                 if (!active || !payload?.length) return null
                 const p = payload[0].payload as Pt
                 const diff = mode === 'pct' ? p.portRet - p.benchRet : p.port - p.bench
+                const diffHold = mode === 'pct' ? p.portRet - p.holdRet : p.port - p.hold
                 return (
                   <TooltipShell
                     title={`${fmtDateTime(p.t, intraday ? {} : { hour: undefined, minute: undefined, year: 'numeric' })}${intraday ? ' ET' : ''}`}
                     rows={[
                       { label: 'Portfolio', swatch: PORT, value: mode === 'pct' ? pct(p.portRet, { sign: true }) : usd(p.port), className: mode === 'pct' ? tone(p.portRet) : undefined },
                       { label: benchLabel, swatch: BENCH, value: mode === 'pct' ? pct(p.benchRet, { sign: true }) : usd(p.bench) },
-                      { label: 'Active', value: mode === 'pct' ? bps(diff) : usd(diff, { sign: true }), className: tone(diff) },
+                      { label: 'Buy & hold', swatch: HOLD, value: mode === 'pct' ? pct(p.holdRet, { sign: true }) : usd(p.hold) },
+                      { label: `vs ${benchLabel}`, value: mode === 'pct' ? bps(diff) : usd(diff, { sign: true }), className: tone(diff) },
+                      { label: 'vs buy & hold', value: mode === 'pct' ? bps(diffHold) : usd(diffHold, { sign: true }), className: tone(diffHold) },
                     ]}
                   />
                 )
@@ -270,6 +283,7 @@ function EquityCurve({ data }: { data: Dashboard }) {
               activeDot={{ r: 4.5, fill: PORT, stroke: '#111318', strokeWidth: 2 }}
               isAnimationActive={false}
             />
+            <Line type="linear" dataKey={yKeyH} stroke={HOLD} strokeWidth={1.75} strokeDasharray="5 4" dot={false} activeDot={{ r: 3.5, fill: HOLD, stroke: '#111318', strokeWidth: 2 }} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
